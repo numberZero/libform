@@ -14,16 +14,17 @@ local function shift(context, pos)
 	return { context.shift[1] + x, context.shift[2] + y }
 end
 
-local function inventory(context, inv)
+local function inventory(context, name, default)
+	local inv = context.namespace.values[name] or default
 	return ("%s;%s"):format(escape(inv[1] or inv.context), escape(inv[2] or inv.name))
 end
 
 local function position(context, pos)
-	return ("%d,%d"):format(unpack(shift(context, pos)))
+	return ("%f,%f"):format(unpack(shift(context, pos)))
 end
 
 local function size(context, size)
-	return ("%d,%d"):format(size[1] or size.width or size.w, size[2] or size.height or size.h)
+	return ("%f,%f"):format(size[1] or size.width or size.w, size[2] or size.height or size.h)
 end
 
 local function namespace(context, name)
@@ -36,6 +37,32 @@ local function namespace(context, name)
 		values = base.values[name] or {},
 		seq = 0,
 	}
+end
+
+local function image(context, img)
+	if not img then
+		return
+	end
+	if type(img) == "string" then
+		return "image", img
+	end
+	local item = img.item or img.node
+	if item then
+		return "item", img.item
+	end
+	local image = img.image or img.texture
+	if image then
+		return "image", image
+	end
+	error("Invalid image specification")
+end
+
+local function image_strs(context, img)
+	local kind, name = image(context, img)
+	if kind then
+		return kind, name .. ";"
+	end
+	return "none", ""
 end
 
 local function build_context(context, desc)
@@ -63,14 +90,14 @@ local function element_name(context, name)
 		return ("%s.%s"):format(context.namespace.name, escape(name))
 	end
 	context.namespace.seq = context.namespace.seq + 1
-	return ("%s..%d"):format(context.namespace.name, context.namespace.seq)
+	return ("%s.-%d"):format(context.namespace.name, context.namespace.seq)
 end
 
 local function element_value(context, name, default)
 	if not name then
-		return escape(default)
+		return escape(default or "")
 	end
-	return escape(context.namespace.values[name] or default)
+	return escape(context.namespace.values[name] or default or "")
 end
 
 libform.elements = {}
@@ -87,10 +114,10 @@ end
 
 function libform.elements.inventory(context, desc)
 	return ("list[%s;%s;%s;%d]"):format(
-		inventory(context, desc.list or desc.inventory),
+		inventory(context, desc.name, desc.list or desc.inventory),
 		position(context, desc.pos or desc.position),
 		size(context, desc.size),
-		desc.start_index or 1
+		desc.start_index or 0
 	)
 end
 
@@ -99,7 +126,7 @@ function libform.elements.field(context, desc)
 		position(context, desc.pos or desc.position),
 		size(context, desc.size),
 		element_name(context, desc.name),
-		escape(desc.label),
+		escape(desc.label or ""),
 		element_value(context, desc.name, desc.default)
 	)
 end
@@ -108,30 +135,38 @@ function libform.elements.label(context, desc)
 	return ("%s[%s;%s]"):format(
 		desc.vertical and "vertlabel" or "label",
 		position(context, desc.pos or desc.position),
-		element_value(context, desc.name, desc.text)
+		element_value(context, desc.name, desc.text or desc.value or desc.label)
 	)
 end
---[[
+
 local button_type = {
-	[ { false, false } ] = "button",
-	[ { true, false } ] = "image_button",
-	[ { "item", false } ] = "item_image_button",
-	[ { false, true } ] = "button_exit",
-	[ { true, true } ] = "image_button_exit",
+	none = "button",
+	image = "image_button",
+	item = "item_image_button",
 }
 
 function libform.elements.button(context, desc)
-	return ("%s[%s;%s]"):format(
-		desc.vertical and "vertlabel" or "label",
+	local image_kind, image_code = image_strs(context, desc.image)
+	local key = button_type[image_kind]
+	local key2 = ""
+	if desc.exit then
+		key2 = "_exit"
+	end
+	return ("%s%s[%s;%s;%s%s;%s]"):format(
+		key,
+		key2,
 		position(context, desc.pos or desc.position),
-		element_value(context, desc.name, desc.text),
+		size(context, desc.size),
+		image_code,
+		element_name(context, desc.name),
+		element_value(context, desc.name, desc.label or desc.text)
 	)
 end
-]]
+
 function libform.build(desc, values)
 	local ctx = {
 		namespace = {
-			name = "libform",
+			name = "libform:form",
 			values = values or {},
 			seq = 0,
 		},
